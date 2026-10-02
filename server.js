@@ -6,7 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
-const Profile = require("./Profile");
+const Profile = require("./profile");
 const Contact = require("./Contact");
 const User = require("./User");
 
