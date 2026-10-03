@@ -1,14 +1,12 @@
-
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
 
-const Profile = require("./profile");
-const Contact = require("./Contact");
 const User = require("./User");
+const Journal = require("./models/Journal");
+const { encrypt, decrypt } = require("./utils/encryption");
 
 const app = express();
 
@@ -20,11 +18,11 @@ app.use(express.json());
 // MONGODB CONNECTION
 // ======================================================
 
-// KEEP YOUR EXISTING WORKING MONGODB CONNECTION STRING HERE.
-// Do NOT change the connection string that is currently working.
-
 mongoose
-  .connect("mongodb+srv://codefolio:codefolio12345@cluster0.pmbyypn.mongodb.net/?appName=Cluster0")
+  .connect(
+    process.env.MONGODB_URI ||
+      "mongodb+srv://mindwell:MindWell2026Test@cluster0.pmbyypn.mongodb.net/mindwell?appName=Cluster0"
+  )
   .then(() => {
     console.log("MongoDB connected successfully");
   })
@@ -34,26 +32,11 @@ mongoose
 
 
 // ======================================================
-// EMAIL / NODEMAILER
-// ======================================================
-
-const EMAIL_USER = "nileshghuge847@gmail.com";
-const EMAIL_PASSWORD = "xhtkihuqwyrciylo";
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASSWORD,
-  },
-});
-
-
-// ======================================================
 // JWT
 // ======================================================
 
-const JWT_SECRET = "CODEFOLIO_SECRET_KEY";
+const JWT_SECRET =
+  process.env.JWT_SECRET || "MINDWELL_SECRET_KEY";
 
 
 // ======================================================
@@ -61,205 +44,37 @@ const JWT_SECRET = "CODEFOLIO_SECRET_KEY";
 // ======================================================
 
 app.get("/", (req, res) => {
-  res.send("CodeFolio backend is running!");
+  res.send("MindWell backend is running!");
 });
 
 
 // ======================================================
-// GET ALL PROFILES
+// AUTH MIDDLEWARE
 // ======================================================
 
-app.get("/api/profiles", async (req, res) => {
+function authenticateToken(req, res, next) {
   try {
-    const profiles = await Profile.find();
+    const authHeader = req.headers.authorization;
 
-    res.json(profiles);
-  } catch (error) {
-    console.log("Get profiles error:", error);
-
-    res.status(500).json({
-      message: "Unable to get profiles",
-    });
-  }
-});
-
-
-// ======================================================
-// GET DEFAULT PROFILE
-// ======================================================
-
-app.get("/api/profile", async (req, res) => {
-  try {
-    const profile = await Profile.findOne();
-
-    if (!profile) {
-      return res.status(404).json({
-        message: "Profile not found",
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        message: "Authentication required",
       });
     }
 
-    res.json(profile);
-  } catch (error) {
-    console.log("Get profile error:", error);
+    const token = authHeader.split(" ")[1];
 
-    res.status(500).json({
-      message: "Unable to get profile",
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    req.userId = decoded.userId;
+
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      message: "Invalid or expired token",
     });
   }
-});
-
-
-// ======================================================
-// GET PROFILE BY USERNAME
-// ======================================================
-
-app.get("/api/profile/:username", async (req, res) => {
-  try {
-    const profile = await Profile.findOne({
-      username: req.params.username,
-    });
-
-    if (!profile) {
-      return res.status(404).json({
-        message: "Profile not found",
-      });
-    }
-
-    res.json(profile);
-  } catch (error) {
-    console.log("Get username profile error:", error);
-
-    res.status(500).json({
-      message: "Unable to get profile",
-    });
-  }
-});
-
-
-// ======================================================
-// SAVE / UPDATE PROFILE
-// ======================================================
-
-app.post("/api/profile", async (req, res) => {
-  try {
-    const {
-      username,
-      name,
-      bio,
-      github,
-      linkedin,
-      resumeUrl,
-      frontendSkills,
-      backendSkills,
-      devopsSkills,
-      projects,
-      templateId,
-    } = req.body;
-
-    if (!username || !name) {
-      return res.status(400).json({
-        message: "Username and name are required",
-      });
-    }
-
-    const profileData = {
-      username,
-      name,
-      bio,
-      github,
-      linkedin,
-      resumeUrl,
-      frontendSkills: frontendSkills || [],
-      backendSkills: backendSkills || [],
-      devopsSkills: devopsSkills || [],
-      projects: projects || [],
-      templateId: templateId || "minimalist",
-    };
-
-    const profile = await Profile.findOneAndUpdate(
-      { username },
-      profileData,
-      {
-        new: true,
-        upsert: true,
-      }
-    );
-
-    res.status(200).json({
-      message: "Profile saved successfully!",
-      profile,
-    });
-  } catch (error) {
-    console.log("Save profile error:", error);
-
-    res.status(500).json({
-      message: "Unable to save profile",
-    });
-  }
-});
-
-
-// ======================================================
-// CONTACT FORM
-// ======================================================
-
-app.post("/api/contact", async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      message,
-      username,
-    } = req.body;
-
-    if (!name || !email || !message) {
-      return res.status(400).json({
-        message: "Please fill all fields",
-      });
-    }
-
-    const contact = new Contact({
-      name,
-      email,
-      message,
-      username,
-    });
-
-    await contact.save();
-
-    await transporter.sendMail({
-      from: `"CodeFolio Contact" <${EMAIL_USER}>`,
-      to: EMAIL_USER,
-      replyTo: email,
-      subject: `New CodeFolio Message from ${name}`,
-      text: `
-New message from your CodeFolio portfolio.
-
-Username:
-${username || "Not provided"}
-
-Name:
-${name}
-
-Email:
-${email}
-
-Message:
-${message}
-      `,
-    });
-
-    res.status(200).json({
-      message: "Message sent successfully!",
-    });
-  } catch (error) {
-    console.log("Contact error:", error);
-
-    res.status(500).json({
-      message: "Unable to send message",
-    });
-  }
-});
+}
 
 
 // ======================================================
@@ -268,11 +83,7 @@ ${message}
 
 app.post("/api/register", async (req, res) => {
   try {
-    const {
-      username,
-      email,
-      password,
-    } = req.body;
+    const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({
@@ -306,17 +117,12 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      password,
-      10
-    );
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = new User({
       username,
       email: email.toLowerCase(),
       password: hashedPassword,
-
-      // New users are not Pro by default
       isPro: false,
     });
 
@@ -335,7 +141,6 @@ app.post("/api/register", async (req, res) => {
     res.status(201).json({
       message: "Registration successful!",
       token,
-
       user: {
         id: user._id,
         username: user.username,
@@ -359,10 +164,7 @@ app.post("/api/register", async (req, res) => {
 
 app.post("/api/login", async (req, res) => {
   try {
-    const {
-      email,
-      password,
-    } = req.body;
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -404,7 +206,6 @@ app.post("/api/login", async (req, res) => {
     res.status(200).json({
       message: "Login successful!",
       token,
-
       user: {
         id: user._id,
         username: user.username,
@@ -426,32 +227,9 @@ app.post("/api/login", async (req, res) => {
 // AUTHENTICATED USER
 // ======================================================
 
-app.get("/api/auth/me", async (req, res) => {
+app.get("/api/auth/me", authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({
-        message: "No token provided",
-      });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({
-        message: "Invalid token",
-      });
-    }
-
-    const decoded = jwt.verify(
-      token,
-      JWT_SECRET
-    );
-
-    const user = await User.findById(
-      decoded.userId
-    ).select("-password");
+    const user = await User.findById(req.userId).select("-password");
 
     if (!user) {
       return res.status(404).json({
@@ -470,24 +248,170 @@ app.get("/api/auth/me", async (req, res) => {
   } catch (error) {
     console.log("Auth error:", error);
 
-    res.status(401).json({
-      message: "Invalid or expired token",
+    res.status(500).json({
+      message: "Unable to get user",
     });
   }
 });
 
 
 // ======================================================
-// START SERVER
+// CREATE JOURNAL
 // ======================================================
 
-app.listen(5000, () => {
-  console.log(
-    "Server running on http://localhost:5000"
-  );
+app.post("/api/journal", authenticateToken, async (req, res) => {
+  try {
+    const {
+      title,
+      content,
+      mood,
+      energy,
+      emotion,
+    } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({
+        message: "Title and content are required",
+      });
+    }
+
+    const journal = new Journal({
+      userId: req.userId,
+      title,
+      content: encrypt(content),
+      mood,
+      energy,
+      emotion,
+    });
+
+    await journal.save();
+
+    res.status(201).json({
+      message: "Journal saved successfully",
+      journal: {
+        id: journal._id,
+        title: journal.title,
+        mood: journal.mood,
+        energy: journal.energy,
+        emotion: journal.emotion,
+        createdAt: journal.createdAt,
+      },
+    });
+  } catch (error) {
+    console.log("Create journal error:", error);
+
+    res.status(500).json({
+      message: "Unable to save journal",
+    });
+  }
 });
 
+
+// ======================================================
+// GET USER JOURNALS
+// ======================================================
+
+app.get("/api/journal", authenticateToken, async (req, res) => {
+  try {
+    const journals = await Journal.find({
+      userId: req.userId,
+    }).sort({
+      createdAt: -1,
+    });
+
+    const decryptedJournals = journals.map((journal) => ({
+      ...journal.toObject(),
+      content: decrypt(journal.content),
+    }));
+
+    res.status(200).json(decryptedJournals);
+  } catch (error) {
+    console.log("Get journals error:", error);
+
+    res.status(500).json({
+      message: "Unable to get journals",
+    });
+  }
+});
+
+
+// ======================================================
+// GET SINGLE JOURNAL
+// ======================================================
+
+app.get(
+  "/api/journal/entry/:id",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const journal = await Journal.findOne({
+        _id: req.params.id,
+        userId: req.userId,
+      });
+
+      if (!journal) {
+        return res.status(404).json({
+          message: "Journal not found",
+        });
+      }
+
+      const decryptedJournal = {
+        ...journal.toObject(),
+        content: decrypt(journal.content),
+      };
+
+      res.status(200).json(decryptedJournal);
+    } catch (error) {
+      console.log("Get journal error:", error);
+
+      res.status(500).json({
+        message: "Unable to get journal",
+      });
+    }
+  }
+);
+
+
+// ======================================================
+// DELETE JOURNAL
+// ======================================================
+
+app.delete(
+  "/api/journal/:id",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const journal = await Journal.findOneAndDelete({
+        _id: req.params.id,
+        userId: req.userId,
+      });
+
+      if (!journal) {
+        return res.status(404).json({
+          message: "Journal not found",
+        });
+      }
+
+      res.status(200).json({
+        message: "Journal deleted successfully",
+      });
+    } catch (error) {
+      console.log("Delete journal error:", error);
+
+      res.status(500).json({
+        message: "Unable to delete journal",
+      });
+    }
+  }
+);
+
+
 // ======================================================
 // START SERVER
 // ======================================================
 
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`MindWell backend running on port ${PORT}`);
+});
